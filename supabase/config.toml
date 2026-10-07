@@ -9,7 +9,7 @@ entrypoint = "./functions/love-notes-mcp/index.ts"
 [auth.oauth_server]
 enabled = true
 allow_dynamic_registration = true
-authorization_url_path = "/oauth/consent"
+authorization_url_path = "/oauth/consent/index.html"
 
 [auth.hook.custom_access_token]
 enabled = true

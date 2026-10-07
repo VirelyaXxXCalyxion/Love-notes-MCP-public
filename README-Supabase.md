@@ -4,6 +4,8 @@ Replaces the sleeping Render Python MCP service with a Supabase Edge Function in
 
 The new function uses stateless Streamable HTTP: it does not depend on a long-lived SSE session. It requires Supabase OAuth tokens with an exact issuer, resource audience, owner, approved client ID, and `openid` scope. Public endpoints only expose discovery and a generic health response. The migration starts the bridge disabled.
 
+The consent page accepts `openid` plus optional `email` and `offline_access`, matching ChatGPT's live OAuth request. It displays every requested permission: identity, the owner's email address, and keeping the connection signed in with refresh tokens. Other scopes are rejected. Signing in does not approve a client; the configured owner must explicitly allow it.
+
 ## Current project and endpoint
 
 - Project: `vgvhvukccbtmvxkmgefb`
@@ -54,9 +56,9 @@ To disable this bridge, set `enabled` to false in its settings row. The access-t
 ## Deployment checkpoint — October 7, 2026
 
 - Supabase Edge Function `love-notes-mcp` version 2 is active; live health and protected-resource discovery returned HTTP 200.
-- The bridge resource URL is configured. Access remains disabled until its real owner account and approved OAuth client exist.
-- Supabase OAuth discovery returned `feature_disabled`; the hosted OAuth server and access-token hook still need enabling in the account settings.
+- The bridge resource URL and confirmed owner account are configured, and the bridge settings are enabled. No OAuth client has been approved yet.
+- Hosted OAuth discovery returns HTTP 200. The owner enabled the custom access-token hook in the dashboard and reported saving the existing ElevenLabs key; using that key still requires the live voice check.
 - JWKS advertises an ES256 key, so no signing-key rotation is needed for the current setup.
-- The existing Chosen Voice Bridge site version 3 includes the consent HTML, JavaScript, and CSS, with owner-only sharing preserved.
-- All 21 bridge tests and TypeScript checking passed. These are local transport and mocked-provider checks; live authenticated search/fetch and the technical voice check remain pending.
+- The existing Chosen Voice Bridge site version 4 includes the corrected consent scope check and permission disclosure, with owner-only sharing preserved.
+- All 24 bridge and consent tests and TypeScript checking passed. These are local transport, consent-flow, and mocked-provider checks; live authenticated search/fetch and the technical voice check remain pending.
 - Keep the existing Render connection and Quiet Vow schedule until the replacement has passed those live checks. No voice note was generated during this checkpoint.

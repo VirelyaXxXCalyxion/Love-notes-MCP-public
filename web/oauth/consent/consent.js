@@ -13,6 +13,11 @@ const consent = document.getElementById('consent');
 const approve = document.getElementById('approve');
 const deny = document.getElementById('deny');
 let details;
+const scopeLabels = new Map([
+  ['openid', 'Confirm your identity (openid)'],
+  ['email', 'Share your owner account email address (email)'],
+  ['offline_access', 'Keep this connection signed in using refresh tokens (offline_access)'],
+]);
 
 function redirect(value) {
   const url = new URL(value);
@@ -28,13 +33,13 @@ async function loadRequest() {
   const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(authorizationId);
   if (error || !data) throw new Error('This connection request is unavailable or expired. Start connecting again from your app.');
   if (!('authorization_id' in data)) { redirect(data.redirect_url); return; }
-  const requested = (data.scope || '').split(' ').filter(Boolean);
-  if (requested.length !== 1 || requested[0] !== 'openid') {
-    throw new Error('This request asks for identity permissions beyond the Love Notes connection. Decline it and start again from your app.');
+  const requested = [...new Set((data.scope || '').split(/\s+/).filter(Boolean))];
+  if (!requested.includes('openid') || requested.some((scope) => !scopeLabels.has(scope))) {
+    throw new Error('This request asks for permissions Love Notes does not support. Close this page and check the connection settings in your app.');
   }
   details = data;
   document.getElementById('client-name').textContent = data.client.name || 'Connecting app';
-  document.getElementById('scopes').textContent = 'Confirm your identity (openid)';
+  document.getElementById('scopes').textContent = requested.map((scope) => scopeLabels.get(scope)).join('; ');
   document.getElementById('return-address').textContent = data.redirect_uri;
   login.hidden = true;
   consent.hidden = false;

@@ -16,14 +16,14 @@ The new function uses stateless Streamable HTTP: it does not depend on a long-li
 1. Apply the SQL in `supabase/migrations` to this existing project. It adds only the bridge settings, reservation table, access-token hook, and owner-only consent RPC; it does not migrate, delete, or rewrite voice notes.
 2. Deploy `supabase/functions/love-notes-mcp`, including `deno.json`. Gateway JWT verification is disabled because the function verifies OAuth tokens itself; this also permits public OAuth discovery. Do not remove that verification from `app.ts`.
 3. Copy the existing **ElevenLabs** key from Render's environment into **Supabase → Edge Functions → Secrets**, named `ELEVENLABS_API_KEY`. Do not put it in source control, browser code, URLs, logs, or chat. Supabase supplies its own `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` automatically. The optional `LOVE_NOTES_BUCKET` defaults to `love-notes`.
-4. Host the static `web` folder on an existing/free HTTPS host, serving `/oauth/consent/`. Only a publishable Supabase key appears in that page. No new paid hosting plan is required. Publishing that page is a remaining setup step until a host URL has been verified.
+4. The static consent page is published on the existing owner-private Chosen Voice Bridge site: `https://chosen-voice-bridge.virelyaxxxnyxion.chatgpt.site/oauth/consent/index.html`. Only a publishable Supabase key appears in that page. The visitor must be signed into the existing Site as its owner. No new host was created.
 5. In **Supabase → Authentication → Users**, create a password account for the owner. Set its actual user UUID in the singleton settings row. Do not guess an ID or use user-editable metadata to authorize access.
-6. In **Authentication → URL Configuration**, set Site URL to the consent page's HTTPS host (including any static-host repository prefix). In **Authentication → OAuth Server**, enable OAuth 2.1, dynamic client registration, and authorization path `/oauth/consent/`. Enable the PostgreSQL custom access-token hook `public.love_notes_mcp_access_token_hook`. If the project uses the legacy HS256 signing key, migrate to an asymmetric signing key before requesting the `openid` scope. Preserve working legacy API keys during the signing-key transition.
+6. In **Authentication → URL Configuration**, set Site URL to `https://chosen-voice-bridge.virelyaxxxnyxion.chatgpt.site`. In **Authentication → OAuth Server**, enable OAuth 2.1, dynamic client registration, and authorization path `/oauth/consent/index.html`. Enable the PostgreSQL custom access-token hook `public.love_notes_mcp_access_token_hook`. If the project uses the legacy HS256 signing key, migrate to an asymmetric signing key before requesting the `openid` scope. Preserve working legacy API keys during the signing-key transition.
 7. Set `resource_url` in `love_notes_bridge_settings` to the exact MCP URL and `enabled` to true. Leave `oauth_client_ids` empty until the owner explicitly allows a registered connection on the consent page. The page's RPC adds the selected client after verifying the signed-in owner's identity.
 8. Create a new ChatGPT custom app/plugin using the MCP URL and OAuth authentication. Sign in on the consent page and approve that connection. ChatGPT discovers Supabase's OAuth endpoints; a separate OAuth provider subscription is unnecessary. The new account password is only entered on the consent page.
 9. Verify live `search` and `fetch`, then one short, explicitly identified technical voice check. Confirm its audio object and `voices` row exist, and that the response confirms `saved: true`. Update Quiet Vow Voice to use the new connected app only after those checks pass. Keep the old connection and Render service available until the scheduled path has been verified.
 
-`supabase/config.toml` records local Auth configuration; deploying an Edge Function does **not** automatically apply those settings to hosted Supabase Auth. Secrets, owner sign-in, remote Auth settings, consent hosting, and the ChatGPT connection must be completed separately.
+`supabase/config.toml` records local Auth configuration; deploying an Edge Function does **not** automatically apply those settings to hosted Supabase Auth. The consent page was published on October 7, 2026. Secrets, owner sign-in, remote Auth settings, and the ChatGPT connection must be completed separately.
 
 ## Interrupted saves
 
@@ -50,3 +50,13 @@ To disable this bridge, set `enabled` to false in its settings row. The access-t
 - [Supabase OAuth token security](https://supabase.com/docs/guides/auth/oauth-server/token-security)
 - [OpenAI MCP authentication](https://developers.openai.com/plugins/build/auth)
 - [Supabase Edge Function pricing](https://supabase.com/docs/guides/functions/pricing)
+
+## Deployment checkpoint — October 7, 2026
+
+- Supabase Edge Function `love-notes-mcp` version 2 is active; live health and protected-resource discovery returned HTTP 200.
+- The bridge resource URL is configured. Access remains disabled until its real owner account and approved OAuth client exist.
+- Supabase OAuth discovery returned `feature_disabled`; the hosted OAuth server and access-token hook still need enabling in the account settings.
+- JWKS advertises an ES256 key, so no signing-key rotation is needed for the current setup.
+- The existing Chosen Voice Bridge site version 3 includes the consent HTML, JavaScript, and CSS, with owner-only sharing preserved.
+- All 21 bridge tests and TypeScript checking passed. These are local transport and mocked-provider checks; live authenticated search/fetch and the technical voice check remain pending.
+- Keep the existing Render connection and Quiet Vow schedule until the replacement has passed those live checks. No voice note was generated during this checkpoint.

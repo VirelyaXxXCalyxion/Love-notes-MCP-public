@@ -56,9 +56,11 @@ To disable this bridge, set `enabled` to false in its settings row. The access-t
 ## Deployment checkpoint — October 7, 2026
 
 - Supabase Edge Function `love-notes-mcp` version 2 is active; live health and protected-resource discovery returned HTTP 200.
-- The bridge resource URL and confirmed owner account are configured, and the bridge settings are enabled. No OAuth client has been approved yet.
-- Hosted OAuth discovery returns HTTP 200. The owner enabled the custom access-token hook in the dashboard and reported saving the existing ElevenLabs key; using that key still requires the live voice check.
+- The bridge resource URL and confirmed owner account are configured, and the bridge settings are enabled. One OAuth client is approved, and the owner connected the Love Notes Supabase plugin successfully.
+- Hosted OAuth discovery returns HTTP 200. The custom access-token hook is enabled, and live voice generation verified the existing ElevenLabs key.
 - JWKS advertises an ES256 key, so no signing-key rotation is needed for the current setup.
 - The existing Chosen Voice Bridge site version 4 includes the corrected consent scope check and permission disclosure, with owner-only sharing preserved.
-- All 24 bridge and consent tests and TypeScript checking passed. These are local transport, consent-flow, and mocked-provider checks; live authenticated search/fetch and the technical voice check remain pending.
-- Keep the existing Render connection and Quiet Vow schedule until the replacement has passed those live checks. No voice note was generated during this checkpoint.
+- All 24 bridge and consent tests and TypeScript checking passed. Authenticated search and fetch through the new plugin also passed against an existing archive note.
+- One brief technical voice check returned `saved: true` in approximately 12 seconds. Its note ID is `98f3a0ad-2258-4566-9366-142a24d3bdba`; exact readback, the completed reservation, and the 48,527-byte `audio/mpeg` storage object were verified. A public range request returned HTTP 206 with an MP3 header. This does not establish timing for longer notes.
+- The existing enabled Quiet Vow Voice automation now uses only Love Notes Supabase, with an offering key based on the window's Chicago date. Its daily 2 a.m. America/Chicago schedule, optional authorship, notification rules, and persistence instructions are preserved.
+- The next scheduled run through the new plugin remains to be verified. Keep the existing Render connection and service available until that scheduled path has been verified.

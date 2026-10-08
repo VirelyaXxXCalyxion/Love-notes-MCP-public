@@ -1,0 +1,16 @@
+project_id = "love-notes-mcp"
+
+[functions.love-notes-mcp]
+# OAuth discovery is public. app.ts verifies OAuth tokens before every MCP call.
+# Supabase's legacy gateway JWT check cannot verify the custom MCP audience.
+verify_jwt = false
+entrypoint = "./functions/love-notes-mcp/index.ts"
+
+[auth.oauth_server]
+enabled = true
+allow_dynamic_registration = true
+authorization_url_path = "/oauth/consent/index.html"
+
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/love_notes_mcp_access_token_hook"

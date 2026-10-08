@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://esm.sh; style-src 'self'; connect-src https://vgvhvukccbtmvxkmgefb.supabase.co https://esm.sh; base-uri 'none'; form-action 'none'">
+  <title>Connect Love Notes</title>
+  <link rel="stylesheet" href="./consent.css">
+  <script type="module" src="./consent.js?v=2"></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">LOVE NOTES</p>
+    <h1>One door.<br>Your permission.</h1>
+    <p id="status" role="status" aria-live="polite">Checking the connection request…</p>
+    <form id="login" hidden>
+      <p>Sign in with your Love Notes owner account to continue.</p>
+      <label for="email">Email</label>
+      <input id="email" type="email" name="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" name="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+    </form>
+    <section id="consent" hidden aria-label="Connection permissions">
+      <h2 id="client-name"></h2>
+      <p>This connection can search and read your Love Notes and create new voice notes when you request them. Creating a voice uses your ElevenLabs credits.</p>
+      <dl>
+        <dt>Requested connection permissions</dt><dd id="scopes"></dd>
+        <dt>Return address</dt><dd id="return-address"></dd>
+      </dl>
+      <div class="actions">
+        <button id="approve" type="button">Allow connection</button>
+        <button id="deny" type="button" class="secondary">Decline</button>
+      </div>
+    </section>
+    <p class="footnote">Signing in here does not create a voice note. Your password stays out of the connecting app.</p>
+  </main>
+</body>
+</html>

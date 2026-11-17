@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { generateKeyPair, SignJWT } from "jose";
+import { errors, generateKeyPair, SignJWT } from "jose";
 import { createHandler } from "../supabase/functions/love-notes-mcp/app.ts";
-import { Archive, BridgeError, type Environment, type Fetcher, type Settings, type Voice } from "../supabase/functions/love-notes-mcp/core.ts";
+import { Archive, BridgeError, type Environment, type Fetcher, type Settings, type StageReporter, type Voice } from "../supabase/functions/love-notes-mcp/core.ts";
 
 const env: Environment = {
   supabaseUrl: "https://archive.example", resourceUrl: "https://archive.example/functions/v1/love-notes-mcp",
@@ -29,7 +29,7 @@ function rpc(bearer?: string, method = "tools/list", params: unknown = {}) {
   });
 }
 
-function fakeArchive(failure?: "provider" | "storage" | "database" | "readback" | "mark_complete") {
+function fakeArchive(failure?: "provider" | "provider_timeout" | "storage" | "database" | "readback" | "mark_complete") {
   const voices = new Map<string, Voice>();
   const claims = new Map<string, { fingerprint: string; status: string; note_id: string }>();
   const calls: string[] = [];
@@ -42,6 +42,7 @@ function fakeArchive(failure?: "provider" | "storage" | "database" | "readback" 
     if (url.host === "api.elevenlabs.io") {
       generations++;
       if (failure === "provider") return json({ error: "provider outage" }, 503);
+      if (failure === "provider_timeout") throw new DOMException("private provider detail", "TimeoutError");
       return new Response(new Uint8Array([73, 68, 51, 0]), { headers: { "Content-Type": "audio/mpeg" } });
     }
     const headers = new Headers(init.headers);
@@ -142,6 +143,23 @@ test("rejects forged signatures", async () => {
   assert.equal((await handle(rpc(forged))).status, 401);
 });
 
+test("reports a signing-key timeout without challenging valid credentials or accessing the archive", async () => {
+  const events: Array<Parameters<StageReporter>[0]> = [];
+  const fake = fakeArchive();
+  const handle = createHandler(env, {
+    settings: async () => settings,
+    getKey: async () => { throw new errors.JWKSTimeout(); },
+    fetch: fake.send,
+    report: (_, event) => events.push(event),
+  });
+  const response = await handle(rpc(await token()));
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("WWW-Authenticate"), null);
+  assert.deepEqual(await response.json(), { error: "signing_keys_timeout" });
+  assert.equal(events.at(-1)?.code, "signing_keys_timeout");
+  assert.deepEqual(fake.calls, []);
+});
+
 test("authenticated MCP lists the three compatible tools and supports separate stateless calls", async () => {
   const archive = fakeArchive();
   const handle = createHandler(env, { settings: async () => settings, getKey: async () => keys.publicKey, fetch: archive.send });
@@ -205,11 +223,31 @@ for (const failure of ["provider", "storage", "database", "readback"] as const) 
   });
 }
 
+test("a provider timeout identifies the stage and preserves the reservation without logging private details", async () => {
+  const fake = fakeArchive("provider_timeout");
+  const archive = new Archive(env, fake.send);
+  const events: Array<Parameters<StageReporter>[0]> = [];
+  await assert.rejects(() => archive.createVoice(input, owner, (event) => events.push(event)), {
+    code: "voice_generation_timeout",
+  });
+  assert.deepEqual(events.map(({ stage, outcome, code }) => [stage, outcome, code]), [
+    ["reserve_offering", "started", undefined],
+    ["reserve_offering", "completed", undefined],
+    ["generate_audio", "started", undefined],
+    ["generate_audio", "failed", "voice_generation_timeout"],
+  ]);
+  await assert.rejects(() => archive.createVoice(input, owner), { code: "save_uncertain" });
+  assert.equal(fake.generations, 1);
+  assert.equal(fake.voices.size, 0);
+});
+
 test("confirmation bookkeeping failure preserves the verified note and prevents regeneration", async () => {
   const fake = fakeArchive("mark_complete");
   const archive = new Archive(env, fake.send);
-  const created = await archive.createVoice(input, owner);
+  const events: Array<Parameters<StageReporter>[0]> = [];
+  const created = await archive.createVoice(input, owner, (event) => events.push(event));
   assert.equal(created.saved, true);
+  assert.equal(events.at(-1)?.code, "reservation_update_failed");
   await assert.rejects(() => archive.createVoice(input, owner), (e: unknown) => e instanceof BridgeError && e.code === "save_uncertain");
   assert.equal(fake.generations, 1);
   assert.equal(fake.voices.size, 1);

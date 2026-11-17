@@ -38,6 +38,28 @@ export class BridgeError extends Error {
   }
 }
 
+export type StageReporter = (event: {
+  stage: string;
+  outcome: "started" | "completed" | "failed";
+  elapsed_ms: number;
+  code?: string;
+}) => void;
+
+export async function observeStage<T>(report: StageReporter | undefined, stage: string, work: () => Promise<T>): Promise<T> {
+  const started = performance.now();
+  report?.({ stage, outcome: "started", elapsed_ms: 0 });
+  try {
+    const value = await work();
+    report?.({ stage, outcome: "completed", elapsed_ms: Math.round(performance.now() - started) });
+    return value;
+  } catch (error) {
+    const code = error instanceof BridgeError ? error.code
+      : error instanceof Error && error.name === "TimeoutError" ? "timeout" : "request_failed";
+    report?.({ stage, outcome: "failed", elapsed_ms: Math.round(performance.now() - started), code });
+    throw error;
+  }
+}
+
 export async function digest(value: string): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(hash), (v) => v.toString(16).padStart(2, "0")).join("");
@@ -106,7 +128,7 @@ export class Archive {
     };
   }
 
-  async createVoice(input: VoiceInput, owner: string): Promise<Record<string, unknown>> {
+  async createVoice(input: VoiceInput, owner: string, report?: StageReporter): Promise<Record<string, unknown>> {
     if (!this.env.elevenLabsKey) {
       throw new BridgeError("voice_key_missing", "The ElevenLabs key must be configured in Supabase before voice generation.");
     }
@@ -116,10 +138,16 @@ export class Archive {
     // With no explicit key, identical offerings in the same UTC day share a claim.
     const key = await digest(`${owner}\n${input.idempotency_key ?? `${this.now().toISOString().slice(0, 10)}:${fingerprint}`}`);
     const noteId = crypto.randomUUID();
-    const claim = await this.request("/rest/v1/love_notes_bridge_requests", {
-      method: "POST", body: JSON.stringify({
-        idempotency_key: key, fingerprint, owner_id: owner, note_id: noteId, status: "pending",
-      }),
+    const claim = await observeStage(report, "reserve_offering", async () => {
+      const response = await this.request("/rest/v1/love_notes_bridge_requests", {
+        method: "POST", body: JSON.stringify({
+          idempotency_key: key, fingerprint, owner_id: owner, note_id: noteId, status: "pending",
+        }),
+      });
+      if (!response.ok && response.status !== 409) {
+        throw new BridgeError("claim_failed", "The offering could not be reserved. No audio was requested.");
+      }
+      return response;
     });
     if (claim.status === 409) {
       const prior = (await this.rows<{ fingerprint: string; status: string; note_id: string }>(
@@ -141,46 +169,65 @@ export class Archive {
         saved: true, reused: true,
       };
     }
-    if (!claim.ok) throw new BridgeError("claim_failed", "The offering could not be reserved. No audio was requested.");
-
     try {
-      const audioResponse = await this.send(
-        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voice_id)}`,
-        {
-          method: "POST",
-          headers: { "xi-api-key": this.env.elevenLabsKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
-          body: JSON.stringify({ text: input.text, model_id: model }),
-          signal: AbortSignal.timeout(65_000),
-        },
-      );
-      if (!audioResponse.ok) throw new BridgeError("voice_generation_failed", `ElevenLabs could not generate the voice (HTTP ${audioResponse.status}).`);
-      if (!audioResponse.headers.get("content-type")?.toLowerCase().startsWith("audio/")) {
-        throw new BridgeError("invalid_audio", "The voice provider did not return audio.");
-      }
-      const audio = await audioResponse.arrayBuffer();
-      if (!audio.byteLength || audio.byteLength > 25 * 1024 * 1024) {
-        throw new BridgeError("invalid_audio", "The voice provider returned empty or oversized audio.");
-      }
+      const elevenLabsKey = this.env.elevenLabsKey;
+      const audio = await observeStage(report, "generate_audio", async () => {
+        const signal = AbortSignal.timeout(65_000);
+        try {
+          const response = await this.send(
+            `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voice_id)}`,
+            {
+              method: "POST",
+              headers: { "xi-api-key": elevenLabsKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
+              body: JSON.stringify({ text: input.text, model_id: model }),
+              signal,
+            },
+          );
+          if (!response.ok) throw new BridgeError("voice_generation_failed", `ElevenLabs could not generate the voice (HTTP ${response.status}).`);
+          if (!response.headers.get("content-type")?.toLowerCase().startsWith("audio/")) {
+            throw new BridgeError("invalid_audio", "The voice provider did not return audio.");
+          }
+          const bytes = await response.arrayBuffer();
+          if (!bytes.byteLength || bytes.byteLength > 25 * 1024 * 1024) {
+            throw new BridgeError("invalid_audio", "The voice provider returned empty or oversized audio.");
+          }
+          return bytes;
+        } catch (error) {
+          if (signal.aborted || (error instanceof Error && error.name === "TimeoutError")) {
+            throw new BridgeError("voice_generation_timeout", "ElevenLabs timed out during voice generation. Do not regenerate this offering.");
+          }
+          throw error;
+        }
+      });
       const storagePath = `voices/${Math.floor(this.now().getTime() / 1000)}-${noteId}.mp3`;
       const objectPath = `${encodeURIComponent(this.env.bucket)}/${storagePath}`;
-      const uploaded = await this.request(`/storage/v1/object/${objectPath}`, {
-        method: "POST", headers: { "Content-Type": "audio/mpeg", "x-upsert": "false" }, body: audio,
+      await observeStage(report, "upload_audio", async () => {
+        const uploaded = await this.request(`/storage/v1/object/${objectPath}`, {
+          method: "POST", headers: { "Content-Type": "audio/mpeg", "x-upsert": "false" }, body: audio,
+        });
+        if (!uploaded.ok) throw new BridgeError("storage_failed", "The generated audio could not be confirmed in storage. Do not regenerate this offering.");
       });
-      if (!uploaded.ok) throw new BridgeError("storage_failed", "The generated audio could not be confirmed in storage. Do not regenerate this offering.");
       const audioUrl = `${this.env.supabaseUrl}/storage/v1/object/public/${objectPath}`;
-      const saved = await this.request("/rest/v1/voices", {
-        method: "POST", headers: { Prefer: "return=representation" },
-        body: JSON.stringify({ id: noteId, title, audio_url: audioUrl, storage_path: storagePath }),
+      await observeStage(report, "insert_note", async () => {
+        const saved = await this.request("/rest/v1/voices", {
+          method: "POST", headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ id: noteId, title, audio_url: audioUrl, storage_path: storagePath }),
+        });
+        if (!saved.ok) throw new BridgeError("save_uncertain", "Audio was uploaded, but the note save is unconfirmed. Do not regenerate this offering.");
       });
-      if (!saved.ok) throw new BridgeError("save_uncertain", "Audio was uploaded, but the note save is unconfirmed. Do not regenerate this offering.");
       // Read back the exact row before reporting success, rather than trusting a POST alone.
-      const verified = await this.fetch(noteId);
-      if (verified.url !== audioUrl || (verified.metadata as Record<string, unknown>).storage_path !== storagePath) {
-        throw new BridgeError("save_uncertain", "The saved note could not be verified. Do not regenerate this offering.");
-      }
-      await this.request(`/rest/v1/love_notes_bridge_requests?${new URLSearchParams({ idempotency_key: `eq.${key}`, status: "eq.pending" })}`, {
-        method: "PATCH", body: JSON.stringify({ status: "completed", completed_at: this.now().toISOString() }),
-      }).catch(() => undefined);
+      await observeStage(report, "verify_note", async () => {
+        const verified = await this.fetch(noteId);
+        if (verified.url !== audioUrl || (verified.metadata as Record<string, unknown>).storage_path !== storagePath) {
+          throw new BridgeError("save_uncertain", "The saved note could not be verified. Do not regenerate this offering.");
+        }
+      });
+      await observeStage(report, "complete_reservation", async () => {
+        const complete = await this.request(`/rest/v1/love_notes_bridge_requests?${new URLSearchParams({ idempotency_key: `eq.${key}`, status: "eq.pending" })}`, {
+          method: "PATCH", body: JSON.stringify({ status: "completed", completed_at: this.now().toISOString() }),
+        });
+        if (!complete.ok) throw new BridgeError("reservation_update_failed", "The saved note's reservation could not be marked complete.");
+      }).catch(() => undefined); // The note is verified. Keep its claim and log a bookkeeping failure.
       return { id: noteId, audio_url: audioUrl, storage_path: storagePath, saved: true };
     } catch (error) {
       // Leave the reservation intact, including when the upstream outcome is uncertain.

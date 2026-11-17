@@ -33,6 +33,14 @@ Voice generation first reserves an offering key. Successful creation requires up
 
 If storage succeeded but the note save was interrupted, inspect the reserved `note_id` and storage object. Reconcile that existing result rather than regenerating the offering. Reservation rows store hashes and IDs, not the spoken words. Existing notes are never overwritten or deleted by this bridge.
 
+## Diagnose a scheduled timeout
+
+Compare the scheduler's run timestamps, the Supabase Edge invocation logs, and the reservation for the same offering key. First try an authenticated fetch of an existing technical note from the scheduler. This exercises connection, authorization, and archive access without generating audio or writing a new note.
+
+Function logs group stage timings and outcome codes under a random request ID. They distinguish bridge settings, authorization, MCP transport, archive reads, reservation, generation, upload, insert, readback, and reservation completion. The log payload excludes words, titles, tokens, URLs, and archive identifiers. An MCP HTTP 200 can carry a tool error. Inspect the stage outcome and the reservation before calling a run successful.
+
+A signing-key lookup timeout returns HTTP 503. A missing or invalid access token still returns HTTP 401. A local ElevenLabs timeout returns `voice_generation_timeout` and retains the reservation. If reservation completion fails after verified readback, the tool still returns the saved note and logs the bookkeeping failure. Use the original key and note ID to reconcile that result.
+
 ## Costs and limits
 
 This uses the existing Supabase Pro project's included Edge Function allowance; usage beyond the plan allowance can still be billed. ElevenLabs voice credits remain separate. No Render paid compute or workspace upgrade is needed for the replacement. Supabase's documented runtime and request limits still apply, and end-to-end voice timing must be tested with the connected app before claiming the timeout issue resolved.

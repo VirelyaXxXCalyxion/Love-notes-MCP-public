@@ -12,6 +12,10 @@ const handle = createHandler({
   supabaseUrl, serviceRoleKey, resourceUrl,
   elevenLabsKey: Deno.env.get("ELEVENLABS_API_KEY"),
   bucket: Deno.env.get("LOVE_NOTES_BUCKET") || "love-notes",
+}, {
+  report: (requestId, event) => {
+    console.info(JSON.stringify({ service: "love-notes-mcp", request_id: requestId, ...event }));
+  },
 });
 
 Deno.serve(async (request) => {
